@@ -1,16 +1,25 @@
 package com.seanime.app
 
 import android.app.Activity
+import android.app.Dialog
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.view.animation.DecelerateInterpolator
 import android.webkit.*
 import android.widget.FrameLayout
+import android.widget.TextView
 
 class MainActivity : Activity() {
 
@@ -33,6 +42,161 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    inner class DonateBridge {
+        @JavascriptInterface
+        fun openDonate() {
+            runOnUiThread {
+                showDonateDialog()
+            }
+        }
+    }
+
+    private fun showDonateDialog() {
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+
+        // Root dim overlay
+        val root = FrameLayout(this)
+        root.setBackgroundColor(Color.parseColor("#99000000"))
+
+        // Card container — bottom sheet
+        val card = FrameLayout(this)
+        card.setBackgroundColor(Color.TRANSPARENT)
+
+        val cardLp = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            (resources.displayMetrics.heightPixels * 0.82).toInt()
+        )
+        cardLp.gravity = Gravity.BOTTOM
+        card.layoutParams = cardLp
+
+        // Rounded top corners background
+        val cardBg = GradientDrawable()
+        cardBg.setColor(Color.parseColor("#0f0f14"))
+        cardBg.cornerRadii = floatArrayOf(32f, 32f, 32f, 32f, 0f, 0f, 0f, 0f)
+        cardBg.setStroke(1, Color.parseColor("#1a1a2e"))
+        card.background = cardBg
+
+        // Drag handle
+        val handle = View(this)
+        val handleLp = FrameLayout.LayoutParams(120, 10)
+        handleLp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        handleLp.topMargin = 20
+        handle.layoutParams = handleLp
+        val handleBg = GradientDrawable()
+        handleBg.setColor(Color.parseColor("#44ffffff"))
+        handleBg.cornerRadius = 99f
+        handle.background = handleBg
+
+        // Top bar
+        val topBar = FrameLayout(this)
+        val topBarLp = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            160
+        )
+        topBarLp.topMargin = 48
+        topBar.layoutParams = topBarLp
+
+        // Title
+        val title = TextView(this)
+        title.text = "Support Seanime"
+        title.setTextColor(Color.WHITE)
+        title.textSize = 17f
+        title.typeface = Typeface.DEFAULT_BOLD
+        val titleLp = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        titleLp.gravity = Gravity.CENTER
+        title.layoutParams = titleLp
+
+        // Close button
+        val closeBtn = TextView(this)
+        closeBtn.text = "✕"
+        closeBtn.setTextColor(Color.parseColor("#88ffffff"))
+        closeBtn.textSize = 18f
+        val closeLp = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        closeLp.gravity = Gravity.CENTER_VERTICAL or Gravity.END
+        closeLp.rightMargin = 56
+        closeBtn.layoutParams = closeLp
+        closeBtn.setOnClickListener { dialog.dismiss() }
+
+        topBar.addView(title)
+        topBar.addView(closeBtn)
+
+        // Divider
+        val divider = View(this)
+        val dividerLp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
+        dividerLp.topMargin = 208
+        divider.layoutParams = dividerLp
+        divider.setBackgroundColor(Color.parseColor("#1affffff"))
+
+        // WebView
+        val donateWebView = WebView(this)
+        val wvLp = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        wvLp.topMargin = 209
+        donateWebView.layoutParams = wvLp
+        donateWebView.setBackgroundColor(Color.parseColor("#0f0f14"))
+        donateWebView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            loadWithOverviewMode = true
+            useWideViewPort = true
+        }
+
+        // Inject dark CSS to blend GitHub into the app theme
+        donateWebView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                val css = "body, .application-main, .logged-out { background: #0f0f14 !important; } " +
+                        "header, .Header, .js-header-wrapper, footer, .footer { display: none !important; } " +
+                        ".container-xl, .container-lg { padding-top: 8px !important; }"
+                view?.evaluateJavascript(
+                    """(function(){
+                        var s = document.createElement('style');
+                        s.textContent = '${css.replace("'", "\\'")}';
+                        document.head.appendChild(s);
+                    })();""", null
+                )
+            }
+        }
+        donateWebView.loadUrl("https://github.com/sponsors/5rahim")
+
+        card.addView(handle)
+        card.addView(topBar)
+        card.addView(divider)
+        card.addView(donateWebView)
+        root.addView(card)
+
+        // Tap outside to dismiss
+        root.setOnClickListener { dialog.dismiss() }
+        card.setOnClickListener { /* consume tap so root doesn't dismiss */ }
+
+        dialog.setContentView(root)
+        dialog.window?.apply {
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            statusBarColor = Color.TRANSPARENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setDecorFitsSystemWindows(false)
+            }
+        }
+
+        // Slide up animation
+        card.translationY = resources.displayMetrics.heightPixels.toFloat()
+        dialog.show()
+        card.animate()
+            .translationY(0f)
+            .setDuration(320)
+            .setInterpolator(DecelerateInterpolator(2f))
+            .start()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,6 +223,7 @@ class MainActivity : Activity() {
         pipManager.registerBridge()
 
         webView.addJavascriptInterface(OrientationBridge(), "OrientationBridge")
+        webView.addJavascriptInterface(DonateBridge(), "DonateBridge")
 
         webView.settings.apply {
             javaScriptEnabled = true
