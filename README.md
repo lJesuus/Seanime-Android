@@ -5,6 +5,10 @@
 <h1 align="center">Seanime for Android</h1>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/STATUS-EARLY%20ALPHA-yellow?style=for-the-badge" />
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/github/last-commit/Pal-droid/Seanime-Android?logo=git&logoColor=white&labelColor=2d3748&color=805ad5&style=for-the-badge" />
   <img src="https://img.shields.io/github/license/5rahim/Seanime?style=for-the-badge" />
 </p>
@@ -29,11 +33,6 @@
 <h2 align="center">Installation</h2>
 <p align="center">
   Grab the APK from the <a href="https://github.com/Pal-droid/Seanime-android/releases">latest releases</a>.
-</p>
-
-<h2 align="center">Building the APK</h2>
-<p align="center">
-  Read the docs at <a href="https://github.com/Pal-droid/Seanime-Android/blob/main/DEVELOPMENT.md">DEVELOPMENT.md</a>.
 </p>
 
 ---
