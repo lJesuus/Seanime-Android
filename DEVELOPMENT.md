@@ -167,7 +167,6 @@ To build for other architectures, change `GOARCH` and place the binary in the co
 |---|---|---|
 | ARM64 (most modern phones) | `arm64` | `jniLibs/arm64-v8a/` |
 | ARM 32-bit | `arm` + `GOARM=7` | `jniLibs/armeabi-v7a/` |
-| x86_64 (emulators) | `amd64` | `jniLibs/x86_64/` |
 
 Gradle will automatically bundle the right binary for each device at install time.
 
