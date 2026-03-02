@@ -61,6 +61,46 @@ object UIPatches {
                         origNav.style.removeProperty('visibility');
                         origNav.style.removeProperty('pointer-events');
                     }
+                    // Remove injected donate-hide style and restore buttons
+                    var donateHide = document.getElementById('__seanime_donate_hide');
+                    if (donateHide) donateHide.remove();
+                    document.querySelectorAll('[data-seanime-donate="true"]').forEach(function(btn) {
+                        btn.removeAttribute('data-seanime-donate');
+                        btn.style.removeProperty('display');
+                    });
+                }
+
+                function hideDonateButton() {
+                    // Inject a CSS rule using the known stable class on the button
+                    if (!document.getElementById('__seanime_donate_hide')) {
+                        var style = document.createElement('style');
+                        style.id = '__seanime_donate_hide';
+                        // Target any UI-Button_root that contains a span.md\:inline-block
+                        // with text "Donate". We use [data-seanime-donate] as a marker
+                        // set imperatively below, since CSS can't match on text content.
+                        style.textContent = '[data-seanime-donate="true"] { display: none !important; }';
+                        document.head.appendChild(style);
+                    }
+
+                    // Walk ALL buttons in the document and mark+hide those with "Donate" text,
+                    // but skip any button that lives inside our custom drawer.
+                    var ourDrawer = document.getElementById('__seanime_drawer');
+                    document.querySelectorAll('button.UI-Button_root, button').forEach(function(btn) {
+                        // Skip buttons that are part of our own drawer
+                        if (ourDrawer && ourDrawer.contains(btn)) return;
+                        // Check the visible span text — avoids matching SVG title text
+                        var spans = btn.querySelectorAll('span');
+                        var isDonate = false;
+                        spans.forEach(function(s) {
+                            if (s.textContent.trim() === 'Donate') isDonate = true;
+                        });
+                        // Fallback: full trimmed textContent
+                        if (!isDonate && btn.textContent.trim() === 'Donate') isDonate = true;
+                        if (isDonate) {
+                            btn.setAttribute('data-seanime-donate', 'true');
+                            btn.style.setProperty('display', 'none', 'important');
+                        }
+                    });
                 }
 
                 function buildDrawer() {
@@ -78,6 +118,9 @@ object UIPatches {
                     origNav.style.setProperty('left', '-9999px', 'important');
                     origNav.style.setProperty('pointer-events', 'auto', 'important');
                     origNav.style.setProperty('visibility', 'hidden', 'important');
+
+                    // Hide the original donate button so it doesn't peek through
+                    hideDonateButton();
 
                     // Backdrop
                     var backdrop = document.createElement('div');
@@ -304,7 +347,11 @@ object UIPatches {
 
                 var observer = new MutationObserver(function(mutations) {
                     var added = mutations.some(function(m) { return m.addedNodes.length > 0; });
-                    if (added) buildDrawer();
+                    if (added) {
+                        buildDrawer();
+                        // Re-apply donate hide in case the nav was re-rendered
+                        if (isSettingsPage()) hideDonateButton();
+                    }
                 });
                 observer.observe(document.body, { childList: true, subtree: true });
 
