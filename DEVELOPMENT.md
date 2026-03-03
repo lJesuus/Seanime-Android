@@ -1,4 +1,4 @@
-# Pal-droid Development Guide
+# Development Guide
 
 A cursed but functional Android port of Seanime. The app runs the full Seanime Go backend as a foreground service and wraps the React web frontend in a WebView.
 
@@ -44,13 +44,120 @@ git clone https://github.com/5rahim/seanime
 cd ~/seanime
 ```
 
-### 2. Build the Go Binary
+### 2. Patch `main.go`
+
+Replace the contents of `main.go` in the root of the seanime directory with the following before building:
+
+```go
+package main
+
+import (
+	"embed"
+	"seanime/internal/server"
+	"context"
+	"net"
+)
+
+func init() {
+    net.DefaultResolver = &net.Resolver{
+        PreferGo: true,
+        Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+            d := net.Dialer{}
+            return d.DialContext(ctx, "udp", "8.8.8.8:53")
+        },
+    }
+}
+
+//go:embed all:web
+var WebFS embed.FS
+
+//go:embed internal/icon/logo.png
+var embeddedLogo []byte
+
+func main() {
+	server.StartServer(WebFS, embeddedLogo)
+}
+```
+
+This forces the Go DNS resolver and bypasses Android's broken DNS stack, which causes all external network requests to fail silently without it.
+
+### 3. Patch the `anet` dependency
+
+The `github.com/wlynxg/anet` package (pulled in by `anacrolix/torrent`, `pion/webrtc`, and others) references unexported Go runtime internals (`net.zoneCache`) that cause a **linker error** when building with `CGO_ENABLED=0` for Android. You must stub it out before building.
+
+**Create the stub:**
 
 ```bash
+mkdir -p ~/seanime/patches/anet
+```
+
+```bash
+cat > ~/seanime/patches/anet/go.mod << 'EOF'
+module github.com/wlynxg/anet
+
+go 1.21
+EOF
+```
+
+```bash
+cat > ~/seanime/patches/anet/anet.go << 'EOF'
+package anet
+
+import "net"
+
+func Interfaces() ([]net.Interface, error) {
+	return net.Interfaces()
+}
+
+func InterfaceAddrs() ([]net.Addr, error) {
+	return net.InterfaceAddrs()
+}
+
+func InterfaceByIndex(index int) (*net.Interface, error) {
+	return net.InterfaceByIndex(index)
+}
+
+func InterfaceByName(name string) (*net.Interface, error) {
+	return net.InterfaceByName(name)
+}
+
+func InterfaceAddrsByInterface(ifi *net.Interface) ([]net.Addr, error) {
+	return ifi.Addrs()
+}
+
+func SetAndroidVersion(version uint) {}
+EOF
+```
+
+**Add the replace directive to `go.mod`** (run from `~/seanime`):
+
+```bash
+sed -i 's/^require /replace github.com\/wlynxg\/anet v0.0.3 => .\/patches\/anet\n\nrequire /' go.mod
+```
+
+**Verify:**
+
+```bash
+grep -A1 "replace" go.mod
+```
+
+You should see:
+```
+replace github.com/wlynxg/anet v0.0.3 => ./patches/anet
+```
+
+The stub re-exports the same public API using stdlib `net`, which works fine in Termux/Android environments where the standard network stack is intact.
+
+### 4. Build the Go Binary
+
+Follow the building steps referenced in the official seanime repo and then build the binary at the root of the directory:
+
+```bash
+go mod tidy
 GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -tags android -ldflags="-s -w" -o seanime-server .
 ```
 
-Then rename it to `libseanime.so` and place it in the correct JNI folder in the `seanime-android` repo.
+Then after building the binary rename it to `libseanime.so` and place it in the correct JNI folder in the `seanime-android` repo.
 
 #### Multi-Architecture Support
 
@@ -60,11 +167,13 @@ To build for other architectures, change `GOARCH` and place the binary in the co
 |---|---|---|
 | ARM64 (most modern phones) | `arm64` | `jniLibs/arm64-v8a/` |
 | ARM 32-bit | `arm` + `GOARM=7` | `jniLibs/armeabi-v7a/` |
-| x86_64 (emulators) | `amd64` | `jniLibs/x86_64/` |
+
+> [!IMPORTANT]
+> Building for ARM 32-bit requires `CGO_ENABLED=1`
 
 Gradle will automatically bundle the right binary for each device at install time.
 
-### 3. Build the APK
+### 5. Build the APK
 
 Open the project in **Android Studio** or **CodeAssist** (on-device) and build from there. Manual Gradle builds are possible but brittle and not recommended.
 
@@ -93,11 +202,12 @@ Open the project in **Android Studio** or **CodeAssist** (on-device) and build f
 | File scanner | ✅ | Works on internal storage |
 | AniList API / Extensions | ✅ | |
 | Online streaming playback | ✅ | HLS.js in WebView, mobile gestures supported |
-| Fullscreen | ✅️ | Fullscreen button non-functional in WebView |
+| Fullscreen | ✅️ | Fullscreen button is functional in WebView |
 | Torrent streaming video | ❌ | Requires MPV — potential future fix via libmpv |
-| System tray | ❌ | Not applicable on Android |
+| System tray | ✅️ | Partially implemented via Android notifications |
 | Discord RPC | ❌ | No named pipe IPC on Android |
 | Desktop notifications | ❌ | Could be added via Android notifications |
+| Verify ChromeDP works | ➖️ | Important, since some extensions rely on headless browser scraping |
 | Self-updater | ❌ | Manual APK update required |
 
 ---

@@ -5,7 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -20,6 +23,8 @@ class SeanimeService : Service() {
     private val NOTIF_ID = 1
     private val ACTION_STOP_SERVICE = "STOP_SEANIME_SERVICE"
     private lateinit var notificationManager: NotificationManager
+    private var lastStatus: String = "Server is running"
+    private var permissionReceiver: BroadcastReceiver? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP_SERVICE) {
@@ -29,13 +34,32 @@ class SeanimeService : Service() {
 
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
-        
+
+        // Call startForeground immediately to satisfy Android's foreground service requirement,
+        // even before permission is granted — this prevents the ForegroundServiceDidNotStartInTimeException
+        promoteToForeground(lastStatus)
+
+        registerPermissionReceiver()
         createFakeResolvConf()
         startBinary()
-        
-        updateNotification("Server is running")
-        
+
         return START_STICKY
+    }
+
+    private fun registerPermissionReceiver() {
+        if (permissionReceiver != null) return
+        permissionReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                Log.d("SeanimeService", "Notification permission granted – retrying notification")
+                promoteToForeground(lastStatus)
+            }
+        }
+        val filter = IntentFilter(ACTION_NOTIFICATION_PERMISSION_GRANTED)
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(permissionReceiver, filter, 0x4) // RECEIVER_NOT_EXPORTED
+        } else {
+            registerReceiver(permissionReceiver, filter)
+        }
     }
 
     private fun createFakeResolvConf() {
@@ -48,31 +72,33 @@ class SeanimeService : Service() {
         }
     }
 
-    private fun updateNotification(status: String) {
+    private fun buildNotification(status: String): Notification {
         val stopIntent = Intent(this, SeanimeService::class.java).apply {
             action = ACTION_STOP_SERVICE
         }
-        
         val pendingStopIntent = PendingIntent.getService(
-            this, 0, stopIntent, 
+            this, 0, stopIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-
-        val notification = Notification.Builder(this, CHANNEL_ID)
+        return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Seanime")
             .setContentText(status)
-            .setSmallIcon(R.mipmap.ic_launcher) // Uses your app icon
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
             .addAction(
                 Notification.Action.Builder(
                     android.R.drawable.ic_menu_close_clear_cancel,
-                    "Exit", 
+                    "Exit",
                     pendingStopIntent
                 ).build()
             )
             .build()
+    }
 
+    private fun promoteToForeground(status: String) {
+        lastStatus = status
+        val notification = buildNotification(status)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         } else {
@@ -84,7 +110,7 @@ class SeanimeService : Service() {
         try {
             val binaryPath = File(applicationInfo.nativeLibraryDir, "libseanime.so")
             if (!binaryPath.exists()) {
-                updateNotification("Error: Binary missing")
+                promoteToForeground("Error: Binary missing")
                 return
             }
 
@@ -103,18 +129,22 @@ class SeanimeService : Service() {
 
             Thread {
                 try {
-                    process?.inputStream?.bufferedReader()?.use { it.forEachLine { line -> Log.d("SeanimeLog", line) } }
+                    process?.inputStream?.bufferedReader()?.use { reader ->
+                        reader.forEachLine { line -> Log.d("SeanimeLog", line) }
+                    }
                 } catch (e: Exception) {
                     Log.e("SeanimeService", "Stream Error", e)
                 }
             }.start()
 
         } catch (e: Exception) {
-            updateNotification("Server failed to start")
+            promoteToForeground("Server failed to start")
         }
     }
 
     override fun onDestroy() {
+        permissionReceiver?.let { unregisterReceiver(it) }
+        permissionReceiver = null
         process?.destroy()
         process = null
         super.onDestroy()
@@ -125,5 +155,9 @@ class SeanimeService : Service() {
     private fun createNotificationChannel() {
         val channel = NotificationChannel(CHANNEL_ID, "Seanime Server", NotificationManager.IMPORTANCE_LOW)
         notificationManager.createNotificationChannel(channel)
+    }
+
+    companion object {
+        const val ACTION_NOTIFICATION_PERMISSION_GRANTED = "com.seanime.app.NOTIFICATION_PERMISSION_GRANTED"
     }
 }
