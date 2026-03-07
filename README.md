@@ -61,6 +61,12 @@
 
 ---
 
+### Other related projects (Made by me)
+
+- [Seanime Extensions](https://github.com/Pal-droid/seanime-providers)
+
+---
+
 <h2 align="center">More info regarding the project</h2>
 <p align="center">
   <a href="https://github.com/5rahim/Seanime">Official Seanime repo</a>
