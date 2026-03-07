@@ -203,7 +203,7 @@ Open the project in **Android Studio** or **CodeAssist** (on-device) and build f
 | AniList API / Extensions | ✅ | |
 | Online streaming playback | ✅ | HLS.js in WebView, mobile gestures supported |
 | Fullscreen | ✅️ | Fullscreen button is functional in WebView |
-| Torrent streaming video | ❌ | Requires MPV — potential future fix via libmpv |
+| Torrent streaming | ✅️ | Via external player |
 | System tray | ✅️ | Partially implemented via Android notifications |
 | Discord RPC | ❌ | No named pipe IPC on Android |
 | Desktop notifications | ❌ | Could be added via Android notifications |
