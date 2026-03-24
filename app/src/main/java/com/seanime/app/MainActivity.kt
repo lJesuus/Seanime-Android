@@ -50,11 +50,11 @@ class MainActivity : Activity() {
         // ── Edge-to-edge: draw behind status bar + navigation bar ──────────
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.setDecorFitsSystemWindows(false)
         }
-        
+
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
@@ -85,6 +85,18 @@ class MainActivity : Activity() {
         }
     }
 
+    // ── Memory pressure forwarding ─────────────────────────────────────────
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        Performance.onTrimMemory(webView, level)
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        Performance.onLowMemory(webView)
+    }
+    // ───────────────────────────────────────────────────────────────────────
+
     private fun startSeanimeService() {
         val intent = Intent(this, SeanimeService::class.java)
         startForegroundService(intent)
@@ -94,12 +106,16 @@ class MainActivity : Activity() {
         webView = WebView(this)
         setContentView(webView)
 
+        // ── Performance: apply WebView-level optimisations before any load ──
+        Performance.init(this, webView)
+        // ───────────────────────────────────────────────────────────────────
+
         // ── Forward system bar insets to the WebView / JS patch system ─────
         webView.setOnApplyWindowInsetsListener { view, insets ->
-            val top = insets.systemWindowInsetTop
+            val top    = insets.systemWindowInsetTop
             val bottom = insets.systemWindowInsetBottom
-            val left = insets.systemWindowInsetLeft
-            val right = insets.systemWindowInsetRight
+            val left   = insets.systemWindowInsetLeft
+            val right  = insets.systemWindowInsetRight
             val js = "window.__seanimeInsets = { top: $top, bottom: $bottom, left: $left, right: $right };"
             view.post { (view as? WebView)?.evaluateJavascript(js, null) }
             insets
@@ -113,13 +129,13 @@ class MainActivity : Activity() {
 
         webView.addJavascriptInterface(OrientationBridge(), "OrientationBridge")
 
+        // Note: Performance.init() already applies comprehensive WebView settings.
+        // The block below keeps only the settings that are either not covered by
+        // Performance or that need to be explicitly re-stated for clarity.
         webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            loadWithOverviewMode = true
-            useWideViewPort = true
-            cacheMode = WebSettings.LOAD_DEFAULT
-            mediaPlaybackRequiresUserGesture = false
+            // Performance.init sets javaScriptEnabled, domStorageEnabled,
+            // loadWithOverviewMode, useWideViewPort, cacheMode, and
+            // mediaPlaybackRequiresUserGesture — no need to repeat them here.
             userAgentString = userAgentString.replace("; wv", "")
         }
 
@@ -139,10 +155,17 @@ class MainActivity : Activity() {
                     } catch (e: ActivityNotFoundException) {
                         val packageName = intent.`package`
                         if (packageName != null) {
-                            val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageName"))
+                            val marketIntent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("market://details?id=$packageName")
+                            )
                             startActivity(marketIntent)
                         } else {
-                            Toast.makeText(this@MainActivity, "No app found to handle this link", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                this@MainActivity,
+                                "No app found to handle this link",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                         true
                     }
@@ -167,10 +190,16 @@ class MainActivity : Activity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 if (view != null) retryCountMap[view] = 0
+
+                // ── Performance: re-inject JS optimisations on every SPA navigation ──
+                Performance.injectRuntimeOptimizations(webView)
+                // ─────────────────────────────────────────────────────────────────────
+
                 pipManager.injectHijacker()
                 DualModeManager.inject(webView)
                 VideoControlInjector.inject(webView)
                 UIPatches.inject(webView)
+                UIBottomNav.inject(webView)
                 AppUpdater.inject(webView)
             }
         }
@@ -216,18 +245,21 @@ class MainActivity : Activity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         pipManager.onPiPModeChanged(isInPictureInPictureMode)
-        
+
         // Reset WebView zoom when exiting PiP
         if (!isInPictureInPictureMode) {
             webView.postDelayed({
                 webView.setInitialScale(100)
                 webView.postDelayed({
-                    webView.evaluateJavascript("""
+                    webView.evaluateJavascript(
+                        """
                         (function() {
                             document.documentElement.style.zoom = '1';
                             document.body.style.zoom = '1';
                         })();
-                    """.trimIndent(), null)
+                        """.trimIndent(),
+                        null
+                    )
                 }, 50)
             }, 100)
         }
@@ -246,8 +278,12 @@ class MainActivity : Activity() {
         } else {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility = if (hide) {
-                (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
-            } else View.SYSTEM_UI_FLAG_VISIBLE
+                (View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+            } else {
+                View.SYSTEM_UI_FLAG_VISIBLE
+            }
         }
     }
 
