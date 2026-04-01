@@ -267,7 +267,6 @@ adb shell curl http://127.0.0.1:43211
 - [ ] Android-native notifications
 - [ ] File picker for external storage
 - [ ] Embedded MPV via libmpv for native torrent streaming video
-- [ ] Android TV support
 - [ ] Auto-update mechanism
 - [ ] Split APKs per architecture for smaller downloads
 
