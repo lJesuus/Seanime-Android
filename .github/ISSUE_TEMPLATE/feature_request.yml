@@ -29,7 +29,6 @@ body:
       label: Feature Description
       description: A clear and concise description of the feature you'd like to see
       placeholder: "What feature would you like to add?"
-    validations:
       required: true
 
   - type: textarea
@@ -41,7 +40,6 @@ body:
         - I want to be able to...
         - The current workflow is...
         - This would improve my experience by...
-    validations:
       required: true
 
   - type: textarea
@@ -54,6 +52,7 @@ body:
         1. User opens the app and...
         2. They can then...
         3. The result would be...
+      required: true
 
   - type: textarea
     id: alternatives
@@ -72,8 +71,7 @@ body:
         - Medium feature (affects one section)
         - Major feature (affects multiple sections)
         - Architectural change
-      validations:
-        required: true
+      required: true
 
   - type: textarea
     id: screenshots
