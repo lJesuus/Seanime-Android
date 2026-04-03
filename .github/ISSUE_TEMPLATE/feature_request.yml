@@ -17,11 +17,8 @@ body:
       description: Before submitting, please confirm the following
       options:
         - label: I've searched for existing feature requests to avoid duplicates
-          required: true
         - label: This feature is relevant to the Android port of Seanime and **not** to the main Seanime repo
-          required: true
         - label: I'm suggesting a feature/improvement, not reporting a bug
-          required: true
 
   - type: textarea
     id: description
@@ -29,7 +26,6 @@ body:
       label: Feature Description
       description: A clear and concise description of the feature you'd like to see
       placeholder: "What feature would you like to add?"
-      required: true
 
   - type: textarea
     id: use-case
@@ -40,7 +36,6 @@ body:
         - I want to be able to...
         - The current workflow is...
         - This would improve my experience by...
-      required: true
 
   - type: textarea
     id: proposed-solution
@@ -52,7 +47,6 @@ body:
         1. User opens the app and...
         2. They can then...
         3. The result would be...
-      required: true
 
   - type: textarea
     id: alternatives
@@ -71,7 +65,6 @@ body:
         - Medium feature (affects one section)
         - Major feature (affects multiple sections)
         - Architectural change
-      required: true
 
   - type: textarea
     id: screenshots
