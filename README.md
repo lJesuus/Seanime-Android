@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  Native Android port of <a href="https://github.com/5rahim/seanime">Seanime</a>, bringing the full desktop experience to mobile.
+  Android port of <a href="https://github.com/5rahim/seanime">Seanime</a>, bringing the full desktop experience to mobile.
 </p>
 
 <p align="center">
