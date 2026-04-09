@@ -196,7 +196,7 @@ Open the project in **Android Studio** or **CodeAssist** (on-device) and build f
 
 | Feature | Status | Notes |
 |---|---|---|
-| Web UI | ✅ | Mobile-optimized |
+| Web UI | ✅ | Mobile-optimized via css injection |
 | Torrent client | ➖️ | Untested |
 | SQLite database | ✅ | Pure Go SQLite (glebarez/sqlite) |
 | File scanner | ✅️ | Works on internal storage |
@@ -272,7 +272,6 @@ adb shell curl http://127.0.0.1:43211
 ## Future Improvements
 
 - [ ] Android-native notifications
-- [ ] File picker for external storage
 - [ ] Embedded MPV via libmpv for native torrent streaming video
 - [ ] Auto-update mechanism
 - [ ] Split APKs per architecture for smaller downloads
