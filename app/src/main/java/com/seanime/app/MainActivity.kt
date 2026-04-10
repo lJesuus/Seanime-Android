@@ -28,7 +28,6 @@ class MainActivity : Activity() {
     private val MAX_RETRIES = 5
     private val REQUEST_CODE_NOTIFICATIONS = 101
 
-    /** The host that the main WebView serves — navigations to this host stay in-app. */
     private val LOCAL_HOST = "127.0.0.1"
 
     inner class OrientationBridge {
@@ -47,7 +46,6 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // ── Edge-to-edge UI: draw behind status bar + navigation bar ──────────
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
 
@@ -61,7 +59,6 @@ class MainActivity : Activity() {
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
             )
         }
-        // ───────────────────────────────────────────────────────────────────
 
         if (Build.VERSION.SDK_INT >= 33) {
             requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), REQUEST_CODE_NOTIFICATIONS)
@@ -69,16 +66,36 @@ class MainActivity : Activity() {
 
         setupWebView()
         startSeanimeService()
-
-        // Hide system bars as soon as the UI is ready
         setSystemBarsHidden(true)
+
+        // --- ADDED: Handle deep link if app was closed ---
+        handleWidgetIntent(intent)
+    }
+
+    // --- ADDED: Handle deep link if app was already in background ---
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent) // Essential for getIntent() to return the latest data
+        handleWidgetIntent(intent)
+    }
+
+    // --- ADDED: The Navigation Logic ---
+    private fun handleWidgetIntent(intent: Intent?) {
+        val data: Uri? = intent?.data
+        if (data != null && data.scheme == "seanime" && data.host == "entry") {
+            val animeId = data.getQueryParameter("id")
+            if (animeId != null) {
+                // Navigate the WebView to the specific entry page
+                webView.postDelayed({
+                    webView.loadUrl("http://127.0.0.1:43211/entry?id=$animeId")
+                }, 500) // Small delay to ensure WebView is ready
+            }
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-
         AppUpdater.onRequestPermissionsResult(requestCode, grantResults)
-
         if (requestCode == REQUEST_CODE_NOTIFICATIONS &&
             grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
         ) {
@@ -105,10 +122,8 @@ class MainActivity : Activity() {
         webView = WebView(this)
         setContentView(webView)
 
-        // 1. Initial config (Settings, Hardware layers, UA)
         Performance.init(this, webView)
 
-        // ── Forward system bar insets to the WebView (Modern API) ─────
         webView.setOnApplyWindowInsetsListener { view, insets ->
             val top: Int
             val bottom: Int
@@ -136,7 +151,6 @@ class MainActivity : Activity() {
             view.post { (view as? WebView)?.evaluateJavascript(js, null) }
             insets
         }
-        // ───────────────────────────────────────────────────────────────────
 
         pipManager = PiPManager(this, webView)
         pipManager.registerBridge()
@@ -174,6 +188,10 @@ class MainActivity : Activity() {
 
                 val host = uri.host ?: return false
                 if (host == LOCAL_HOST) return false
+                
+                // --- ADDED: Ensure our custom scheme doesn't open a popup sheet ---
+                if (uri.scheme == "seanime") return false
+
                 PopupWebViewSheet.show(this@MainActivity, uri.toString())
                 return true
             }
@@ -186,9 +204,7 @@ class MainActivity : Activity() {
                 super.onPageFinished(view, url)
                 if (view != null) retryCountMap[view] = 0
 
-                // 2. RUNTIME OPTIMIZATIONS (Injected after DOM is ready)
                 Performance.injectRuntimeOptimizations(webView)
-
                 pipManager.injectHijacker()
                 DualModeManager.inject(webView)
                 VideoControlInjector.inject(webView)
@@ -209,7 +225,7 @@ class MainActivity : Activity() {
                 val decor = window.decorView as FrameLayout
                 decor.addView(customView, FrameLayout.LayoutParams(-1, -1))
                 webView.visibility = View.GONE
-                setSystemBarsHidden(true) // hide bars for fullscreen video
+                setSystemBarsHidden(true)
             }
 
             override fun onHideCustomView() {
@@ -218,13 +234,16 @@ class MainActivity : Activity() {
                 customView = null
                 customViewCallback?.onCustomViewHidden()
                 webView.visibility = View.VISIBLE
-                setSystemBarsHidden(true) // keep bars hidden after exiting fullscreen
+                setSystemBarsHidden(true)
             }
         }
 
-        webView.postDelayed({
-            webView.loadUrl("http://127.0.0.1:43211")
-        }, 1000)
+        // Only load the home page if there isn't a deep link intent pending
+        if (intent?.data == null) {
+            webView.postDelayed({
+                webView.loadUrl("http://127.0.0.1:43211")
+            }, 1000)
+        }
     }
 
     private fun retry(view: WebView?) {
@@ -249,16 +268,11 @@ class MainActivity : Activity() {
                         null
                     )
                 }, 50)
-                // Hide system bars again after exiting PiP
                 setSystemBarsHidden(true)
             }, 100)
         }
     }
 
-    /**
-     * Hides or shows the system bars (status and navigation) based on [hide].
-     * Uses the modern API on API 30+ and the legacy immersive sticky flags on older versions.
-     */
     private fun setSystemBarsHidden(hide: Boolean) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.insetsController?.let {
