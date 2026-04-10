@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.seanime.app">
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -8,7 +9,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <!-- Required to save APK to public Downloads folder on Android 9 and below -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" 
+        tools:ignore="ScopedStorage" />
+    
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
@@ -30,7 +34,36 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="seanime" android:host="entry" />
+            </intent-filter>
         </activity>
+
+        <activity
+            android:name=".FileManagerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Seanime"
+            android:label="File Manager" />
+
+        <receiver
+            android:name=".widget.UpcomingAnimeWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/upcoming_anime_widget_info" />
+        </receiver>
+
+        <service
+            android:name=".widget.AnimeListService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+            android:exported="false" />
 
         <service
             android:name=".SeanimeService"
@@ -39,5 +72,4 @@
             android:foregroundServiceType="connectedDevice" />
 
     </application>
-
 </manifest>
