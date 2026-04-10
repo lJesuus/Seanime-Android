@@ -8,6 +8,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.content.ComponentName
 import android.widget.RemoteViews
 import com.seanime.app.R
 import com.seanime.app.SeanimeService
@@ -16,17 +17,23 @@ class UpcomingAnimeWidget : AppWidgetProvider() {
 
     companion object {
         const val ACTION_REFRESH = "com.seanime.app.widget.ACTION_REFRESH"
+        const val ACTION_DATA_UPDATED = "com.seanime.app.widget.ACTION_DATA_UPDATED"
     }
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        val cache = WidgetCache(context)
         for (id in appWidgetIds) {
-            updateWidget(context, appWidgetManager, id)
+            if (!cache.hasValidCache() || cache.isLoading()) {
+                refreshWidget(context, appWidgetManager, id)
+            } else {
+                updateWidget(context, appWidgetManager, id)
+            }
         }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        
+
         if (ACTION_REFRESH == intent.action) {
             val appWidgetManager = AppWidgetManager.getInstance(context)
             val appWidgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 
@@ -40,6 +47,12 @@ class UpcomingAnimeWidget : AppWidgetProvider() {
                 // Start server and refresh
                 refreshWidget(context, appWidgetManager, appWidgetId)
             }
+        } else if (ACTION_DATA_UPDATED == intent.action) {
+            val appWidgetManager = AppWidgetManager.getInstance(context)
+            val ids = appWidgetManager.getAppWidgetIds(ComponentName(context, UpcomingAnimeWidget::class.java))
+            for (id in ids) {
+                updateWidget(context, appWidgetManager, id)
+            }
         }
     }
 
@@ -50,7 +63,8 @@ class UpcomingAnimeWidget : AppWidgetProvider() {
         // Show/hide loading text based on cache state
         if (cache.isLoading() || !cache.hasValidCache()) {
             views.setViewVisibility(R.id.loading_text, android.view.View.VISIBLE)
-            views.setViewVisibility(R.id.anime_list_view, android.view.View.GONE)
+            // Keep the ListView around so RemoteViewsService still runs and can fetch.
+            views.setViewVisibility(R.id.anime_list_view, android.view.View.INVISIBLE)
         } else {
             views.setViewVisibility(R.id.loading_text, android.view.View.GONE)
             views.setViewVisibility(R.id.anime_list_view, android.view.View.VISIBLE)
@@ -94,16 +108,17 @@ class UpcomingAnimeWidget : AppWidgetProvider() {
         val serviceIntent = Intent(context, SeanimeService::class.java)
         context.startForegroundService(serviceIntent)
 
-        // Update widget to show loading state
-        val views = RemoteViews(context.packageName, R.layout.widget_layout)
-        views.setViewVisibility(R.id.loading_text, android.view.View.VISIBLE)
-        views.setViewVisibility(R.id.anime_list_view, android.view.View.GONE)
-        
-        appWidgetManager.updateAppWidget(appWidgetId, views)
-        
-        // Delay slightly to allow server to start, then update
+        WidgetCache(context).setLoading(true)
+
+        // Bind adapter immediately (so the factory can start working) while showing loading.
+        updateWidget(context, appWidgetManager, appWidgetId)
+
+        // Force a dataset refresh right away.
+        appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.anime_list_view)
+
+        // Also retry shortly after to cover slow server boot.
         Handler(Looper.getMainLooper()).postDelayed({
-            updateWidget(context, appWidgetManager, appWidgetId)
+            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.anime_list_view)
         }, 2000)
     }
 }

@@ -41,7 +41,7 @@
             android:layout_height="24dp"
             android:layout_alignParentEnd="true"
             android:layout_centerVertical="true"
-            android:src="@android:drawable/ic_menu_rotate"
+            android:src="@android:drawable/ic_popup_sync"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:padding="4dp" />
     </RelativeLayout>

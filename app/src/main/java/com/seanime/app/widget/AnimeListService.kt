@@ -15,6 +15,7 @@ import android.util.Log
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import com.seanime.app.R
+import com.seanime.app.SeanimeService
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -34,13 +35,13 @@ class AnimeListService : RemoteViewsService() {
 class AnimeListFactory(private val context: Context) : RemoteViewsService.RemoteViewsFactory {
     private val animeItems = Collections.synchronizedList(mutableListOf<AnimeEntry>())
     private val cache = WidgetCache(context)
-    private var isLoading = false
     
     data class AnimeEntry(
         val title: String,
         val episode: Int,
         val timeUntil: Long,
         val mediaId: Int,
+        val coverUrl: String,
         var thumbnail: Bitmap?
     )
 
@@ -105,34 +106,32 @@ class AnimeListFactory(private val context: Context) : RemoteViewsService.Remote
             return
         }
 
-        // Start loading
-        isLoading = true
         cache.setLoading(true)
-        
-        Thread {
-            try {
-                val freshData = fetchFreshData()
-                
-                synchronized(this) {
-                    animeItems.clear()
-                    animeItems.addAll(freshData)
-                }
-                
-                // Save to cache
-                cache.saveCacheData(freshData)
-                
-                // Close Seanime server after fetching
-                closeSeanimeServer()
-                
-            } catch (e: Exception) {
-                Log.e("SeanimeWidget", "Sync Error: ${e.message}")
-                // Try to load from cache as fallback
-                loadFromCache()
-            } finally {
-                isLoading = false
-                cache.setLoading(false)
+        try {
+            Log.d("SeanimeWidget", "Widget fetch starting (no valid cache)")
+            val freshData = fetchFreshData()
+
+            synchronized(this) {
+                animeItems.clear()
+                animeItems.addAll(freshData)
             }
-        }.start()
+
+            cache.saveCacheData(freshData)
+
+            Log.d("SeanimeWidget", "Widget fetch completed: ${freshData.size} items")
+
+            context.sendBroadcast(Intent(context, UpcomingAnimeWidget::class.java).apply {
+                action = UpcomingAnimeWidget.ACTION_DATA_UPDATED
+            })
+
+            // Close server process (service owns the native process)
+            context.stopService(Intent(context, SeanimeService::class.java))
+        } catch (e: Exception) {
+            Log.e("SeanimeWidget", "Sync Error: ${e.message}")
+            loadFromCache()
+        } finally {
+            cache.setLoading(false)
+        }
     }
 
     private fun loadFromCache() {
@@ -152,12 +151,18 @@ class AnimeListFactory(private val context: Context) : RemoteViewsService.Remote
         
         try {
             // 1. Get Username
-            val statusJson = makeRequest("http://localhost:43211/api/v1/status", "GET", null)
+            try {
+                Thread.sleep(1000L)
+            } catch (_: InterruptedException) {
+            }
+            Log.d("SeanimeWidget", "Fetching status from localhost...")
+            val statusJson = makeRequestWithRetry("http://localhost:43211/api/v1/status", "GET", null)
             val username = JSONObject(statusJson)
                 .getJSONObject("data")
                 .getJSONObject("user")
                 .getJSONObject("viewer")
                 .getString("name")
+            Log.d("SeanimeWidget", "Local status OK; viewer=$username")
 
             // 2. Get User ID
             val idQuery = "query { User(name: \"$username\") { id } }"
@@ -167,6 +172,7 @@ class AnimeListFactory(private val context: Context) : RemoteViewsService.Remote
                 .getJSONObject("data")
                 .getJSONObject("User")
                 .getInt("id")
+            Log.d("SeanimeWidget", "AniList userId=$userId")
 
             // 3. Get Media List
             val listQuery = """
@@ -210,6 +216,7 @@ class AnimeListFactory(private val context: Context) : RemoteViewsService.Remote
                             next.getInt("episode"),
                             next.getLong("timeUntilAiring"),
                             media.getInt("id"),
+                            coverUrl,
                             thumb
                         ))
                     }
@@ -226,20 +233,25 @@ class AnimeListFactory(private val context: Context) : RemoteViewsService.Remote
         return tempItems
     }
 
-    private fun closeSeanimeServer() {
-        try {
-            // Send request to close the Seanime server
-            makeRequest("http://localhost:43211/api/v1/shutdown", "POST", null)
-            Log.d("SeanimeWidget", "Seanime server shutdown request sent")
-        } catch (e: Exception) {
-            Log.e("SeanimeWidget", "Error shutting down server: ${e.message}")
-        }
+    private fun loadThumbnail(entry: AnimeEntry): Bitmap? {
+        return downloadAndScale(entry.coverUrl)
     }
 
-    private fun loadThumbnail(entry: AnimeEntry): Bitmap? {
-        // This would need to fetch the cover image URL again
-        // For now, return null to avoid complex cache management
-        return null
+    private fun makeRequestWithRetry(urlStr: String, method: String, body: String?): String {
+        var last: Exception? = null
+        // Seanime server can take a few seconds to boot. Give it a wider window.
+        for (i in 0 until 40) {
+            try {
+                return makeRequest(urlStr, method, body)
+            } catch (e: Exception) {
+                last = e
+                try {
+                    Thread.sleep(250L)
+                } catch (_: InterruptedException) {
+                }
+            }
+        }
+        throw last ?: RuntimeException("Request failed")
     }
 
     private fun makeRequest(urlStr: String, method: String, body: String?): String {

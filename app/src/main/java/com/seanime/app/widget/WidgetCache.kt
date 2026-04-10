@@ -25,7 +25,7 @@ class WidgetCache(context: Context) {
                     put("episode", entry.episode)
                     put("timeUntil", entry.timeUntil)
                     put("mediaId", entry.mediaId)
-                    // Note: Bitmap is not cached to save space, will be re-downloaded
+                    put("coverUrl", entry.coverUrl)
                 }
                 jsonArray.put(jsonEntry)
             }
@@ -55,6 +55,7 @@ class WidgetCache(context: Context) {
                         jsonEntry.getInt("episode"),
                         jsonEntry.getLong("timeUntil"),
                         jsonEntry.getInt("mediaId"),
+                        jsonEntry.optString("coverUrl", ""),
                         null // Thumbnail will be loaded on demand
                     )
                     entries.add(entry)
