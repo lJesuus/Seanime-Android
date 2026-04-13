@@ -36,9 +36,7 @@ class SeanimeService : Service() {
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
 
-        // Call startForeground immediately to satisfy Android's foreground service requirement
         promoteToForeground(lastStatus)
-
         registerPermissionReceiver()
         createFakeResolvConf()
         startBinary()
@@ -50,14 +48,11 @@ class SeanimeService : Service() {
         if (permissionReceiver != null) return
         permissionReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                Log.d("SeanimeService", "Notification permission granted – retrying notification")
                 promoteToForeground(lastStatus)
             }
         }
         val filter = IntentFilter(ACTION_NOTIFICATION_PERMISSION_GRANTED)
         if (Build.VERSION.SDK_INT >= 33) {
-            // Using 0x4 directly to avoid unresolved reference errors in some SDK environments
-            // 0x4 corresponds to Context.RECEIVER_NOT_EXPORTED
             registerReceiver(permissionReceiver, filter, 0x4)
         } else {
             registerReceiver(permissionReceiver, filter)
@@ -83,7 +78,6 @@ class SeanimeService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // Fix: Use Icon.createWithResource to avoid the deprecated Action.Builder constructor
         val actionIcon = Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel)
         val stopAction = Notification.Action.Builder(actionIcon, "Exit", pendingStopIntent).build()
 
@@ -107,19 +101,63 @@ class SeanimeService : Service() {
         }
     }
 
+    private fun prepareBinary(): File? {
+        try {
+            val targetDir = filesDir
+            val targetBinary = File(targetDir, "libseanime.so")
+            
+            val sourceBinary = File(applicationInfo.nativeLibraryDir, "libseanime.so")
+            if (!sourceBinary.exists()) {
+                promoteToForeground("Error: Binary missing in native lib dir")
+                return null
+            }
+            
+            if (!targetBinary.exists() || sourceBinary.length() != targetBinary.length()) {
+                sourceBinary.copyTo(targetBinary, overwrite = true)
+                try {
+                    Runtime.getRuntime().exec(arrayOf("chmod", "755", targetBinary.absolutePath)).waitFor()
+                } catch (e: Exception) {
+                    targetBinary.setExecutable(true)
+                }
+            }
+            
+            val sourceCpp = File(applicationInfo.nativeLibraryDir, "libc++_shared.so")
+            if (sourceCpp.exists()) {
+                val targetCpp = File(targetDir, "libc++_shared.so")
+                if (!targetCpp.exists() || sourceCpp.length() != targetCpp.length()) {
+                    sourceCpp.copyTo(targetCpp, overwrite = true)
+                }
+            }
+            
+            return targetBinary
+        } catch (e: Exception) {
+            promoteToForeground("Error: Failed to prepare binary")
+            return null
+        }
+    }
+
     private fun startBinary() {
         try {
-            val binaryPath = File(applicationInfo.nativeLibraryDir, "libseanime.so")
-            if (!binaryPath.exists()) {
-                promoteToForeground("Error: Binary missing")
+            val binaryPath = prepareBinary()
+            if (binaryPath == null) {
+                promoteToForeground("Error: Binary preparation failed")
                 return
             }
 
-            val pb = ProcessBuilder(binaryPath.absolutePath, "--datadir", filesDir.absolutePath)
+            if (!binaryPath.exists()) {
+                promoteToForeground("Error: Binary missing after preparation")
+                return
+            }
+
+            promoteToForeground("Server is running")
+
+            val linker = "/system/bin/linker"
+            val pb = ProcessBuilder(linker, binaryPath.absolutePath, "--datadir", filesDir.absolutePath)
                 .directory(filesDir)
                 .redirectErrorStream(true)
 
             pb.environment().apply {
+                put("LD_LIBRARY_PATH", filesDir.absolutePath)
                 put("GODEBUG", "netdns=cgo")
                 put("RESOLV_CONF", File(filesDir, "resolv.conf").absolutePath)
                 put("HOME", filesDir.absolutePath)
@@ -128,18 +166,21 @@ class SeanimeService : Service() {
 
             process = pb.start()
 
+            // Read output silently
             Thread {
                 try {
                     process?.inputStream?.bufferedReader()?.use { reader ->
-                        reader.forEachLine { line -> Log.d("SeanimeLog", line) }
+                        while (reader.readLine() != null) {
+                            // Do nothing, just consume output
+                        }
                     }
                 } catch (e: Exception) {
-                    Log.e("SeanimeService", "Stream Error", e)
+                    // Ignore
                 }
             }.start()
 
         } catch (e: Exception) {
-            promoteToForeground("Server failed to start")
+            promoteToForeground("Error: ${e.message?.take(60)}")
         }
     }
 
