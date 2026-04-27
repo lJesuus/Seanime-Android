@@ -11,6 +11,7 @@ object UIPatches {
         UIEntryPatch.inject(webView)
         UISettingsPatch.inject(webView)
         UITorrentPatch.inject(webView)
+        UIDirectorySelectorPatch.inject(webView)
         UIDiscoverPatch.inject(webView)
     }
 }

@@ -225,26 +225,26 @@ object AppUpdater {
     }
 
     private fun checkStoragePermission(installAfter: Boolean): Boolean {
-        return if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                if (activity.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
-                    true
-                } else {
-                    activity.requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), PERMISSION_REQUEST_CODE)
-                    false
-                }
-            } else {
-                true
-            }
-        } else {
-            true
-        }
+        // We no longer need public storage permission since we download directly to the app's internal filesDir
+        return true
     }
 
     private fun fetchAndDownload(installAfter: Boolean, currentVersion: String?, onComplete: () -> Unit, onError: (String) -> Unit) {
         thread {
             try {
-                // 1. Fetch releases list
+                // 0. Check main repository for the true latest version
+                val mainConn = URL("https://api.github.com/repos/5rahim/seanime/releases/latest").openConnection() as HttpURLConnection
+                mainConn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+                mainConn.setRequestProperty("User-Agent", "Seanime-App-Updater")
+                mainConn.connectTimeout = 15000
+
+                val mainJson = mainConn.inputStream.bufferedReader().readText()
+                mainConn.disconnect()
+                
+                val mainRelease = org.json.JSONObject(mainJson)
+                val mainLatestVersion = mainRelease.getString("tag_name").removePrefix("v")
+
+                // 1. Fetch fork releases list
                 val releaseConn = URL(RELEASES_URL).openConnection() as HttpURLConnection
                 releaseConn.setRequestProperty("Accept", "application/vnd.github.v3+json")
                 releaseConn.setRequestProperty("User-Agent", "Seanime-App-Updater")
@@ -261,55 +261,70 @@ object AppUpdater {
 
                 val latestRelease = releasesArray.getJSONObject(0)
 
-                // 2. Find APK asset and extract its version
+                // 2. Find SO asset and extract its version
                 val assets = latestRelease.getJSONArray("assets")
-                var apkUrl: String? = null
-                var apkVersion: String? = null
+                var soUrl: String? = null
+                var releaseVersion: String? = null
 
                 for (i in 0 until assets.length()) {
                     val asset = assets.getJSONObject(i)
                     val name = asset.getString("name")
-                    if (name.endsWith(".apk")) {
-                        apkUrl = asset.getString("browser_download_url")
-                        apkVersion = extractVersionFromApkName(name)
+                    if (name.endsWith(".so") || name.contains("seanime")) { // Adjust pattern if needed
+                        soUrl = asset.getString("browser_download_url")
+                        releaseVersion = latestRelease.getString("tag_name").removePrefix("v")
+                        // If it's specifically an APK, skip it. We want the binary.
+                        if (name.endsWith(".apk")) {
+                            soUrl = null
+                            continue
+                        }
                         break
                     }
                 }
 
-                if (apkUrl == null) {
-                    onError("No APK found in release")
+                if (soUrl == null) {
+                    onError("No binary (.so) found in the fork's release")
                     return@thread
                 }
 
-                // 3. Version check (only for updates)
-                if (installAfter) {
-                    val baseVersion = currentVersion ?: getCurrentVersionName()
-                    if (apkVersion == null || !isNewerVersion(baseVersion, apkVersion)) {
-                        onError("No updates available for Android yet, try again later")
-                        return@thread
-                    }
+                // 3. Version checks
+                val baseVersion = currentVersion ?: getEffectiveVersion()
+                
+                // If we are already up to date with the main repo, there's nothing to do
+                if (!isNewerVersion(baseVersion, mainLatestVersion)) {
+                     onError("You are already on the latest version ($baseVersion)")
+                     return@thread
                 }
 
-                // 4. Download the APK
-                val dlConn = URL(apkUrl).openConnection() as HttpURLConnection
+                // If the fork's latest release is older than the main repo's latest release
+                if (isNewerVersion(releaseVersion ?: "0.0.0", mainLatestVersion)) {
+                     onError("Android build for v$mainLatestVersion is not ready yet. Please wait until it is uploaded to the fork.")
+                     return@thread
+                }
+
+                // 4. Download the Binary
+                val dlConn = URL(soUrl).openConnection() as HttpURLConnection
                 dlConn.setRequestProperty("User-Agent", "Seanime-App-Updater")
                 dlConn.instanceFollowRedirects = true
 
-                val fileName = apkUrl.substringAfterLast('/').ifEmpty { "update.apk" }
-                val uri = dlConn.inputStream.use { inputStream ->
-                    saveApkToDownloads(inputStream, fileName)
+                val updateFile = File(activity.filesDir, "libseanime.so.update")
+                val updateVersionFile = File(activity.filesDir, "ota_version.update")
+                
+                dlConn.inputStream.use { input ->
+                    FileOutputStream(updateFile).use { output ->
+                        input.copyTo(output)
+                    }
                 }
                 dlConn.disconnect()
-
-                if (uri == null) {
-                    onError("Could not save APK to Downloads")
-                    return@thread
-                }
+                
+                // Save the version we just downloaded
+                releaseVersion?.let { updateVersionFile.writeText(it) }
 
                 onComplete()
 
                 if (installAfter) {
-                    mainHandler.post { installApk(uri) }
+                    mainHandler.post { 
+                        Toast.makeText(activity, "Update downloaded. Restart the app to apply.", Toast.LENGTH_LONG).show()
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -324,6 +339,30 @@ object AppUpdater {
         val pattern = Pattern.compile("s(\\d+\\.\\d+\\.\\d+)")
         val matcher = pattern.matcher(name)
         return if (matcher.find()) matcher.group(1) else null
+    }
+
+    private fun getEffectiveVersion(): String {
+        val apkVersion = getCurrentVersionName()
+        val otaVersionFile = File(activity.filesDir, "ota_version.txt")
+        val otaTimeFile = File(activity.filesDir, "ota_time.txt")
+        
+        try {
+            val pInfo = activity.packageManager.getPackageInfo(activity.packageName, 0)
+            val apkUpdateTime = pInfo.lastUpdateTime
+            
+            if (otaVersionFile.exists() && otaTimeFile.exists()) {
+                val otaTime = otaTimeFile.readText().toLongOrNull() ?: 0L
+                if (otaTime >= apkUpdateTime) {
+                    val otaVer = otaVersionFile.readText().trim()
+                    if (isNewerVersion(apkVersion, otaVer)) {
+                        return otaVer
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Fallback to apk version
+        }
+        return apkVersion
     }
 
     private fun getCurrentVersionName(): String {
@@ -351,54 +390,7 @@ object AppUpdater {
         return false
     }
 
-    private fun saveApkToDownloads(inputStream: java.io.InputStream, fileName: String): Uri? {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val contentValues = android.content.ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.android.package-archive")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-            }
-            val resolver = activity.contentResolver
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-            uri?.let {
-                resolver.openOutputStream(it)?.use { outputStream ->
-                    inputStream.copyTo(outputStream)
-                }
-            }
-            uri
-        } else {
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!downloadsDir.exists()) downloadsDir.mkdirs()
-            val file = File(downloadsDir, fileName)
-            FileOutputStream(file).use { outputStream ->
-                inputStream.copyTo(outputStream)
-            }
-            Uri.fromFile(file)
-        }
-    }
-
-    private fun installApk(uri: Uri) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !activity.packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(activity, "Please enable 'Install unknown apps' for Seanime", Toast.LENGTH_LONG).show()
-            val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                data = Uri.parse("package:${activity.packageName}")
-            }
-            activity.startActivity(intent)
-            return
-        }
-
-        val installIntent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-
-        try {
-            activity.startActivity(installIntent)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(activity, "Unable to launch installer: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
+    // Removed saveApkToDownloads and installApk as they are no longer needed for binary updates
 
     private fun dismissSeanimeModal() {
         webView.evaluateJavascript("""

@@ -15,6 +15,10 @@ import android.view.WindowInsetsController
 import android.webkit.*
 import android.widget.FrameLayout
 import android.widget.Toast
+import android.provider.MediaStore
+import android.provider.Settings
+import android.os.Environment
+import android.provider.DocumentsContract
 import java.net.URISyntaxException
 
 class MainActivity : Activity() {
@@ -27,6 +31,8 @@ class MainActivity : Activity() {
     private val retryCountMap = mutableMapOf<WebView, Int>()
     private val MAX_RETRIES = 5
     private val REQUEST_CODE_NOTIFICATIONS = 101
+    private val REQUEST_CODE_STORAGE = 102
+    private val REQUEST_CODE_FOLDER_PICKER = 103
 
     private val LOCAL_HOST = "127.0.0.1"
 
@@ -39,6 +45,16 @@ class MainActivity : Activity() {
                 } else {
                     ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 }
+            }
+        }
+    }
+
+    inner class FolderPickerBridge {
+        @JavascriptInterface
+        fun openFolderPicker() {
+            runOnUiThread {
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+                startActivityForResult(intent, REQUEST_CODE_FOLDER_PICKER)
             }
         }
     }
@@ -63,6 +79,8 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) {
             requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), REQUEST_CODE_NOTIFICATIONS)
         }
+        
+        checkAndRequestStoragePermissions()
 
         setupWebView()
         startSeanimeService()
@@ -89,6 +107,30 @@ class MainActivity : Activity() {
                 webView.postDelayed({
                     webView.loadUrl("http://127.0.0.1:43211/entry?id=$animeId")
                 }, 500) // Small delay to ensure WebView is ready
+            }
+        }
+    }
+
+    private fun checkAndRequestStoragePermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                try {
+                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                    intent.data = Uri.parse("package:$packageName")
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    startActivity(intent)
+                }
+            }
+        } else {
+            if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                    arrayOf(
+                        android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                        android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                    ), REQUEST_CODE_STORAGE
+                )
             }
         }
     }
@@ -158,6 +200,7 @@ class MainActivity : Activity() {
         AppUpdater.init(this, webView)
 
         webView.addJavascriptInterface(OrientationBridge(), "OrientationBridge")
+        webView.addJavascriptInterface(FolderPickerBridge(), "FolderPickerBridge")
 
         var hasError = false
 
@@ -310,6 +353,36 @@ class MainActivity : Activity() {
                 View.SYSTEM_UI_FLAG_VISIBLE
             }
         }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_CODE_FOLDER_PICKER && resultCode == Activity.RESULT_OK) {
+            val uri = data?.data ?: return
+            val path = resolveUriToPath(uri)
+            if (path != null) {
+                webView.evaluateJavascript("window.onFolderSelected?.('$path')", null)
+            } else {
+                Toast.makeText(this, "Could not resolve path", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun resolveUriToPath(uri: Uri): String? {
+        // Handle tree URI (ACTION_OPEN_DOCUMENT_TREE)
+        val documentId = DocumentsContract.getTreeDocumentId(uri)
+        val parts = documentId.split(":")
+        if (parts.size >= 2) {
+            val type = parts[0]
+            val relativePath = parts[1]
+            if ("primary".equals(type, ignoreCase = true)) {
+                return Environment.getExternalStorageDirectory().absolutePath + "/" + relativePath
+            } else {
+                // Handle SD card if needed, but primary is most common
+                return "/storage/$type/$relativePath"
+            }
+        }
+        return null
     }
 
     override fun onBackPressed() {

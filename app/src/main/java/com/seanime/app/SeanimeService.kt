@@ -105,36 +105,54 @@ class SeanimeService : Service() {
         try {
             val targetDir = filesDir
             val targetBinary = File(targetDir, "libseanime.so")
+            val updateBinary = File(targetDir, "libseanime.so.update")
             
             val nativeLibDir = applicationInfo.nativeLibraryDir
-            Log.d("SeanimeService", "nativeLibraryDir: $nativeLibDir")
-            
-            val nativeDir = File(nativeLibDir)
-            if (nativeDir.exists()) {
-                val files = nativeDir.listFiles()
-                Log.d("SeanimeService", "Files in nativeLibDir: ${files?.map { "${it.name} (${it.length()} bytes)" }}")
-            } else {
-                Log.e("SeanimeService", "nativeLibraryDir does NOT exist!")
-            }
-            
             val sourceBinary = File(nativeLibDir, "libseanime.so")
-            if (!sourceBinary.exists()) {
-                promoteToForeground("Error: Binary missing in $nativeLibDir")
-                Log.e("SeanimeService", "libseanime.so not found in $nativeLibDir")
-                return null
+
+            val pInfo = packageManager.getPackageInfo(packageName, 0)
+            val apkUpdateTime = pInfo.lastUpdateTime
+            val otaTimeFile = File(targetDir, "ota_time.txt")
+            var isOtaValid = false
+
+            if (otaTimeFile.exists()) {
+                val otaTime = otaTimeFile.readText().toLongOrNull() ?: 0L
+                if (otaTime >= apkUpdateTime) {
+                    isOtaValid = true
+                }
             }
-            
-            Log.d("SeanimeService", "Source binary found: ${sourceBinary.length()} bytes")
-            
-            if (!targetBinary.exists() || sourceBinary.length() != targetBinary.length()) {
-                Log.d("SeanimeService", "Copying binary to ${targetBinary.absolutePath}")
+
+            if (updateBinary.exists() && updateBinary.length() > 0) {
+                Log.d("SeanimeService", "Applying OTA binary update...")
+                updateBinary.copyTo(targetBinary, overwrite = true)
+                updateBinary.delete()
+                targetBinary.setExecutable(true)
+                otaTimeFile.writeText(System.currentTimeMillis().toString())
+                
+                // Finalize version update
+                val pendingVersionFile = File(targetDir, "ota_version.update")
+                if (pendingVersionFile.exists()) {
+                    pendingVersionFile.copyTo(File(targetDir, "ota_version.txt"), overwrite = true)
+                    pendingVersionFile.delete()
+                }
+                
+                isOtaValid = true
+            }
+
+            if (!targetBinary.exists() || (!isOtaValid && sourceBinary.length() != targetBinary.length())) {
+                if (!sourceBinary.exists()) {
+                    promoteToForeground("Error: Binary missing in $nativeLibDir")
+                    Log.e("SeanimeService", "libseanime.so not found in $nativeLibDir")
+                    return null
+                }
+                Log.d("SeanimeService", "Copying binary from APK to ${targetBinary.absolutePath}")
                 sourceBinary.copyTo(targetBinary, overwrite = true)
                 try {
                     Runtime.getRuntime().exec(arrayOf("chmod", "755", targetBinary.absolutePath)).waitFor()
                 } catch (e: Exception) {
                     targetBinary.setExecutable(true)
                 }
-                Log.d("SeanimeService", "Binary copied and made executable")
+                otaTimeFile.delete()
             }
             
             val sourceCpp = File(nativeLibDir, "libc++_shared.so")
