@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Pal-droid/Seanime-Android/main/images/seanime.png" width="80px"/>
+  <img src="https://raw.githubusercontent.com/lJesuus/Seanime-Android/main/images/seanime.png" width="80px"/>
 </p>
 
 <h1 align="center">Seanime for Android</h1>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Pal-droid/Seanime-Android/main/images/preview.png" width="800"/>
+  <img src="https://raw.githubusercontent.com/lJesuus/Seanime-Android/main/images/preview.png" width="800"/>
 </p>
 
 <p align="center">
@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/last-commit/Pal-droid/Seanime-Android?logo=git&logoColor=white&labelColor=2d3748&color=805ad5&style=for-the-badge" />
+  <img src="https://img.shields.io/github/last-commit/lJesuus/Seanime-Android?logo=git&logoColor=white&labelColor=2d3748&color=805ad5&style=for-the-badge" />
   <img src="https://img.shields.io/github/license/5rahim/Seanime?style=for-the-badge" />
 </p>
 
@@ -36,7 +36,7 @@
 
 <h2 align="center">Installation</h2>
 <p align="center">
-  Grab the APK from the <a href="https://github.com/Pal-droid/Seanime-android/releases">latest releases</a>.
+  Grab the APK from the <a href="https://github.com/lJesuus/Seanime-Android/releases">latest releases</a>.
 </p>
 
 ---
@@ -44,7 +44,7 @@
 ## Important Notes
 
 > [!IMPORTANT]
-> **Independent Project:** This port is maintained by Me **(Pal-droid)**. The original creator of Seanime (**5rahim**) is **not** responsible for this Android version. Please [open all related issues here](https://github.com/Pal-droid/Seanime-android/issues) rather than on the main repo.
+> **Independent Project:** This port is maintained by Me **(lJesuus)**. The original creator of Seanime (**5rahim**) is **not** responsible for this Android version. Please [open all related issues here](https://github.com/lJesuus/Seanime-Android/issues) rather than on the main repo.
 
 * **Early Alpha:** This project is in early development. Expect bugs and untested features.
 * **Battery Optimization:** Since the Go backend runs as a foreground service, you may need to exclude the app from battery optimization for the best experience.
@@ -63,7 +63,7 @@
 
 ### Other related projects (Made by me)
 
-- [Seanime Extensions](https://github.com/Pal-droid/seanime-providers)
+- [Seanime Extensions](https://github.com/5rahim/seanime-providers)
 
 ---
 

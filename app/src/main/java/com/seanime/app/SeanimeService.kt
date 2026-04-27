@@ -95,7 +95,7 @@ class SeanimeService : Service() {
         lastStatus = status
         val notification = buildNotification(status)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             startForeground(NOTIF_ID, notification)
         }
@@ -106,22 +106,38 @@ class SeanimeService : Service() {
             val targetDir = filesDir
             val targetBinary = File(targetDir, "libseanime.so")
             
-            val sourceBinary = File(applicationInfo.nativeLibraryDir, "libseanime.so")
+            val nativeLibDir = applicationInfo.nativeLibraryDir
+            Log.d("SeanimeService", "nativeLibraryDir: $nativeLibDir")
+            
+            val nativeDir = File(nativeLibDir)
+            if (nativeDir.exists()) {
+                val files = nativeDir.listFiles()
+                Log.d("SeanimeService", "Files in nativeLibDir: ${files?.map { "${it.name} (${it.length()} bytes)" }}")
+            } else {
+                Log.e("SeanimeService", "nativeLibraryDir does NOT exist!")
+            }
+            
+            val sourceBinary = File(nativeLibDir, "libseanime.so")
             if (!sourceBinary.exists()) {
-                promoteToForeground("Error: Binary missing in native lib dir")
+                promoteToForeground("Error: Binary missing in $nativeLibDir")
+                Log.e("SeanimeService", "libseanime.so not found in $nativeLibDir")
                 return null
             }
             
+            Log.d("SeanimeService", "Source binary found: ${sourceBinary.length()} bytes")
+            
             if (!targetBinary.exists() || sourceBinary.length() != targetBinary.length()) {
+                Log.d("SeanimeService", "Copying binary to ${targetBinary.absolutePath}")
                 sourceBinary.copyTo(targetBinary, overwrite = true)
                 try {
                     Runtime.getRuntime().exec(arrayOf("chmod", "755", targetBinary.absolutePath)).waitFor()
                 } catch (e: Exception) {
                     targetBinary.setExecutable(true)
                 }
+                Log.d("SeanimeService", "Binary copied and made executable")
             }
             
-            val sourceCpp = File(applicationInfo.nativeLibraryDir, "libc++_shared.so")
+            val sourceCpp = File(nativeLibDir, "libc++_shared.so")
             if (sourceCpp.exists()) {
                 val targetCpp = File(targetDir, "libc++_shared.so")
                 if (!targetCpp.exists() || sourceCpp.length() != targetCpp.length()) {
@@ -131,7 +147,8 @@ class SeanimeService : Service() {
             
             return targetBinary
         } catch (e: Exception) {
-            promoteToForeground("Error: Failed to prepare binary")
+            Log.e("SeanimeService", "prepareBinary failed", e)
+            promoteToForeground("Error: ${e.javaClass.simpleName}: ${e.message?.take(80)}")
             return null
         }
     }
@@ -149,37 +166,65 @@ class SeanimeService : Service() {
                 return
             }
 
-            promoteToForeground("Server is running")
+            Log.d("SeanimeService", "Starting binary: ${binaryPath.absolutePath}")
+            Log.d("SeanimeService", "Binary size: ${binaryPath.length()} bytes, executable: ${binaryPath.canExecute()}")
 
-            val linker = "/system/bin/linker"
-            val pb = ProcessBuilder(linker, binaryPath.absolutePath, "--datadir", filesDir.absolutePath)
+            val env = mutableMapOf<String, String>()
+            env["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir + ":" + filesDir.absolutePath
+            env["GODEBUG"] = "netdns=go"
+            env["RESOLV_CONF"] = File(filesDir, "resolv.conf").absolutePath
+            env["HOME"] = filesDir.absolutePath
+            env["TMPDIR"] = cacheDir.absolutePath
+
+            // Try direct execution first (works for statically-linked Go binaries)
+            val pb = ProcessBuilder(binaryPath.absolutePath, "--datadir", filesDir.absolutePath)
                 .directory(filesDir)
                 .redirectErrorStream(true)
 
-            pb.environment().apply {
-                put("LD_LIBRARY_PATH", filesDir.absolutePath)
-                put("GODEBUG", "netdns=cgo")
-                put("RESOLV_CONF", File(filesDir, "resolv.conf").absolutePath)
-                put("HOME", filesDir.absolutePath)
-                put("TMPDIR", cacheDir.absolutePath)
+            pb.environment().putAll(env)
+
+            try {
+                process = pb.start()
+                Log.d("SeanimeService", "Binary started with direct execution")
+            } catch (e: Exception) {
+                Log.w("SeanimeService", "Direct execution failed: ${e.message}, trying linker64")
+                // Fall back to linker64 for arm64
+                val linker = if (android.os.Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()) 
+                    "/system/bin/linker64" else "/system/bin/linker"
+                Log.d("SeanimeService", "Using linker: $linker")
+                val pb2 = ProcessBuilder(linker, binaryPath.absolutePath, "--datadir", filesDir.absolutePath)
+                    .directory(filesDir)
+                    .redirectErrorStream(true)
+                pb2.environment().putAll(env)
+                process = pb2.start()
+                Log.d("SeanimeService", "Binary started with $linker")
             }
 
-            process = pb.start()
+            promoteToForeground("Server is running")
 
-            // Read output silently
+            // Log output from the process
             Thread {
                 try {
                     process?.inputStream?.bufferedReader()?.use { reader ->
-                        while (reader.readLine() != null) {
-                            // Do nothing, just consume output
+                        var line = reader.readLine()
+                        while (line != null) {
+                            Log.d("SeanimeServer", line)
+                            line = reader.readLine()
                         }
                     }
                 } catch (e: Exception) {
-                    // Ignore
+                    Log.e("SeanimeService", "Error reading process output", e)
+                }
+                // Process ended
+                val exitCode = try { process?.waitFor() } catch (e: Exception) { -1 }
+                Log.w("SeanimeService", "Binary process exited with code: $exitCode")
+                if (exitCode != 0 && exitCode != null) {
+                    promoteToForeground("Error: Server exited (code $exitCode)")
                 }
             }.start()
 
         } catch (e: Exception) {
+            Log.e("SeanimeService", "startBinary failed", e)
             promoteToForeground("Error: ${e.message?.take(60)}")
         }
     }

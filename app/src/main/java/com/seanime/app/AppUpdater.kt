@@ -36,7 +36,7 @@ import kotlin.concurrent.thread
 
 object AppUpdater {
 
-    private const val RELEASES_URL = "https://api.github.com/repos/Pal-droid/Seanime-Android/releases"
+    private const val RELEASES_URL = "https://api.github.com/repos/lJesuus/Seanime-Android/releases"
     private const val PERMISSION_REQUEST_CODE = 1001
 
     private lateinit var activity: Activity

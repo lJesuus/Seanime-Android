@@ -159,7 +159,14 @@ class MainActivity : Activity() {
 
         webView.addJavascriptInterface(OrientationBridge(), "OrientationBridge")
 
+        var hasError = false
+
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                hasError = false
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val uri = request?.url ?: return false
 
@@ -197,12 +204,22 @@ class MainActivity : Activity() {
             }
 
             override fun onReceivedError(view: WebView?, req: WebResourceRequest?, err: WebResourceError?) {
-                if (req?.isForMainFrame == true) retry(view)
+                if (req?.isForMainFrame == true) {
+                    hasError = true
+                    retry(view)
+                }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 if (view != null) retryCountMap[view] = 0
+
+                if (hasError) return
+                
+                // Do not inject patches into Chrome error pages or external links
+                if (url == null || !url.startsWith("http://127.0.0.1:43211")) {
+                    return
+                }
 
                 Performance.injectRuntimeOptimizations(webView)
                 pipManager.injectHijacker()

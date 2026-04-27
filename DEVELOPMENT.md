@@ -41,7 +41,7 @@ Clone the official seanime repo and cd into it
 
 ```bash
 git clone https://github.com/5rahim/seanime
-cd ~/seanime
+cd seanime
 ```
 
 ### 2. Patch `main.go`
@@ -152,12 +152,17 @@ The stub re-exports the same public API using stdlib `net`, which works fine in 
 
 Follow the building steps referenced in the official seanime repo and then build the binary at the root of the directory:
 
-```bash
 go mod tidy
-GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -tags android -ldflags="-s -w" -o seanime-server .
+$env:GOOS="android"; $env:GOARCH="arm64"; $env:CGO_ENABLED="0"
+go build -tags nosystray -ldflags="-s -w" -o libseanime.so .
 ```
 
-Then after building the binary rename it to `libseanime.so` and place it in the correct JNI folder in the `seanime-android` repo.
+Then place the `libseanime.so` binary in the correct JNI folder in this repo: `app/src/main/jniLibs/arm64-v8a/`.
+
+> [!IMPORTANT]
+> To ensure Android extracts the library to the filesystem (so it can be executed), the following must be set:
+> - `AndroidManifest.xml`: `android:extractNativeLibs="true"`
+> - `build.gradle.kts`: `jniLibs { useLegacyPackaging = true }`
 
 #### Multi-Architecture Support
 
