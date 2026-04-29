@@ -2,6 +2,7 @@ package com.seanime.app
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
@@ -33,8 +34,39 @@ class MainActivity : Activity() {
     private val REQUEST_CODE_NOTIFICATIONS = 101
     private val REQUEST_CODE_STORAGE = 102
     private val REQUEST_CODE_FOLDER_PICKER = 103
+    private val REQUEST_CODE_EXTERNAL_PLAYER = 104
 
     private val LOCAL_HOST = "127.0.0.1"
+    
+    private var currentPlayingTitle: String = ""
+
+    inner class ExternalPlayerBridge {
+        var lastUrl: String = ""
+        @JavascriptInterface
+        fun setUrl(url: String) {
+            lastUrl = url
+        }
+    }
+
+    private val externalPlayerBridge = ExternalPlayerBridge()
+
+    private fun savePlaybackPosition(title: String, positionMs: Long) {
+        if (title.isEmpty()) return
+        val prefs = getSharedPreferences("seanime_playback", Context.MODE_PRIVATE)
+        prefs.edit().putLong(title, positionMs).apply()
+    }
+
+    private fun getSavedPlaybackPosition(title: String): Long {
+        if (title.isEmpty()) return -1L
+        val prefs = getSharedPreferences("seanime_playback", Context.MODE_PRIVATE)
+        return prefs.getLong(title, -1L)
+    }
+
+    private fun clearPlaybackPosition(title: String) {
+        if (title.isEmpty()) return
+        val prefs = getSharedPreferences("seanime_playback", Context.MODE_PRIVATE)
+        prefs.edit().remove(title).apply()
+    }
 
     inner class OrientationBridge {
         @JavascriptInterface
@@ -104,11 +136,38 @@ class MainActivity : Activity() {
             val animeId = data.getQueryParameter("id")
             if (animeId != null) {
                 // Navigate the WebView to the specific entry page
-                webView.postDelayed({
-                    webView.loadUrl("http://127.0.0.1:43211/entry?id=$animeId")
-                }, 500) // Small delay to ensure WebView is ready
+                waitForServerAndLoadUrl("http://127.0.0.1:43211/entry?id=$animeId")
             }
         }
+    }
+
+    private fun waitForServerAndLoadUrl(url: String) {
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val checkInterval = 200L
+        val maxWaitTime = 15000L // 15 seconds
+        val startTime = System.currentTimeMillis()
+
+        Thread {
+            var serverReady = false
+            while (System.currentTimeMillis() - startTime < maxWaitTime) {
+                try {
+                    val socket = java.net.Socket()
+                    socket.connect(java.net.InetSocketAddress("127.0.0.1", 43211), 200)
+                    socket.close()
+                    serverReady = true
+                    break
+                } catch (e: Exception) {
+                    Thread.sleep(checkInterval)
+                }
+            }
+
+            handler.post {
+                if (!serverReady) {
+                    Toast.makeText(this@MainActivity, "Timeout waiting for server", Toast.LENGTH_LONG).show()
+                }
+                webView.loadUrl(url)
+            }
+        }.start()
     }
 
     private fun checkAndRequestStoragePermissions() {
@@ -214,8 +273,31 @@ class MainActivity : Activity() {
                 val uri = request?.url ?: return false
 
                 if (uri.scheme == "intent") {
+                    val uriString = uri.toString()
+
                     return try {
-                        val intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
+                        val intent = Intent.parseUri(uriString, Intent.URI_INTENT_SCHEME)
+                        
+                        // Force ACTION_VIEW for videos to ensure standard players can handle it
+                        if (intent.type?.startsWith("video/") == true || uriString.contains("video/")) {
+                            intent.action = Intent.ACTION_VIEW
+                            
+                            val title = intent.getStringExtra("title") ?: "Seanime Stream"
+                            currentPlayingTitle = title
+                            
+                            val savedPos = getSavedPlaybackPosition(title)
+                            if (savedPos > 0) {
+                                // VLC uses extra_position (long), MX Player uses position (int)
+                                intent.putExtra("position", savedPos.toInt())
+                                intent.putExtra("extra_position", savedPos)
+                            }
+                            
+                            android.util.Log.d("SeanimeExternalPlayer", "Firing intent: ${intent.dataString} with title '$title' at pos $savedPos")
+                            startActivityForResult(intent, REQUEST_CODE_EXTERNAL_PLAYER)
+                            return true
+                        }
+
+                        android.util.Log.d("SeanimeExternalPlayer", "Firing intent: ${intent.dataString}")
                         startActivity(intent)
                         true
                     } catch (e: URISyntaxException) {
@@ -300,9 +382,7 @@ class MainActivity : Activity() {
 
         // Only load the home page if there isn't a deep link intent pending
         if (intent?.data == null) {
-            webView.postDelayed({
-                webView.loadUrl("http://127.0.0.1:43211")
-            }, 1000)
+            waitForServerAndLoadUrl("http://127.0.0.1:43211")
         }
     }
 
@@ -357,6 +437,22 @@ class MainActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_CODE_EXTERNAL_PLAYER) {
+            val pos = data?.getLongExtra("extra_position", -1L) 
+                   ?: data?.getIntExtra("position", -1)?.toLong() ?: -1L
+            val duration = data?.getLongExtra("extra_duration", -1L) ?: -1L
+            
+            if (pos > 0 && currentPlayingTitle.isNotEmpty()) {
+                // If user watched more than 90%, consider it finished and don't resume next time
+                if (duration > 0 && pos > duration * 0.90) {
+                    clearPlaybackPosition(currentPlayingTitle)
+                } else {
+                    savePlaybackPosition(currentPlayingTitle, pos)
+                }
+            }
+            currentPlayingTitle = ""
+        }
+        
         if (requestCode == REQUEST_CODE_FOLDER_PICKER && resultCode == Activity.RESULT_OK) {
             val uri = data?.data ?: return
             val path = resolveUriToPath(uri)

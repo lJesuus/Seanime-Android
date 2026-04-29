@@ -124,9 +124,11 @@ class SeanimeService : Service() {
 
             if (updateBinary.exists() && updateBinary.length() > 0) {
                 Log.d("SeanimeService", "Applying OTA binary update...")
+                if (targetBinary.exists()) targetBinary.setWritable(true)
                 updateBinary.copyTo(targetBinary, overwrite = true)
                 updateBinary.delete()
                 targetBinary.setExecutable(true)
+                targetBinary.setReadOnly()
                 otaTimeFile.writeText(System.currentTimeMillis().toString())
                 
                 // Finalize version update
@@ -146,12 +148,14 @@ class SeanimeService : Service() {
                     return null
                 }
                 Log.d("SeanimeService", "Copying binary from APK to ${targetBinary.absolutePath}")
+                if (targetBinary.exists()) targetBinary.setWritable(true)
                 sourceBinary.copyTo(targetBinary, overwrite = true)
                 try {
                     Runtime.getRuntime().exec(arrayOf("chmod", "755", targetBinary.absolutePath)).waitFor()
                 } catch (e: Exception) {
                     targetBinary.setExecutable(true)
                 }
+                targetBinary.setReadOnly()
                 otaTimeFile.delete()
             }
             
@@ -171,8 +175,39 @@ class SeanimeService : Service() {
         }
     }
 
+    private fun killOrphanedProcesses() {
+        try {
+            val procDir = File("/proc")
+            if (procDir.exists() && procDir.isDirectory) {
+                procDir.listFiles()?.forEach { pidFile ->
+                    if (pidFile.isDirectory && pidFile.name.matches(Regex("\\d+"))) {
+                        try {
+                            val cmdlineFile = File(pidFile, "cmdline")
+                            if (cmdlineFile.exists()) {
+                                val cmdline = cmdlineFile.readText().trim('\u0000', ' ')
+                                if (cmdline.contains("libseanime.so")) {
+                                    val pid = pidFile.name.toInt()
+                                    if (pid != android.os.Process.myPid()) {
+                                        Log.d("SeanimeService", "Killing orphaned process: $pid")
+                                        android.os.Process.killProcess(pid)
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Ignore access errors for processes not owned by this UID
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("SeanimeService", "Failed to kill orphaned processes", e)
+        }
+    }
+
     private fun startBinary() {
         try {
+            killOrphanedProcesses()
+            
             val binaryPath = prepareBinary()
             if (binaryPath == null) {
                 promoteToForeground("Error: Binary preparation failed")
@@ -245,6 +280,14 @@ class SeanimeService : Service() {
             Log.e("SeanimeService", "startBinary failed", e)
             promoteToForeground("Error: ${e.message?.take(60)}")
         }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d("SeanimeService", "App removed from recents, shutting down server")
+        process?.destroy()
+        process = null
+        stopSelf()
     }
 
     override fun onDestroy() {

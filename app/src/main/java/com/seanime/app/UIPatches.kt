@@ -13,5 +13,6 @@ object UIPatches {
         UITorrentPatch.inject(webView)
         UIDirectorySelectorPatch.inject(webView)
         UIDiscoverPatch.inject(webView)
+        UIExternalPlayerPatch.inject(webView)
     }
 }
